@@ -32,7 +32,7 @@ class PoeOrbBot:
             "annulment_pos": None,
             "item_positions": [],
             "target_affixes": [],
-            "interval": None,
+            "interval": 0.02,
         }
        
         self.config_file = "poe_orb_config.json"
@@ -207,7 +207,7 @@ class PoeOrbBotGUI:
         self.bot = bot
         self.root = tk.Tk()
         self.root.title("POEorbBot")
-        self.root.geometry("550x650")
+        self.root.geometry("550x880")
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         
         self.coord_type = tk.StringVar(value="transmutation")
