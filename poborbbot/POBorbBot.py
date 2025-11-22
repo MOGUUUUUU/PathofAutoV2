@@ -11,6 +11,8 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from tkinter import Listbox, Scrollbar, Frame, Label, Button
 
+pyautogui.PAUSE = 0.035
+
 class PoeOrbBot:
     def __init__(self):
         self.running = False
@@ -61,7 +63,7 @@ class PoeOrbBot:
         with open(path, "w", encoding="utf-8") as f:
             json.dump(self.config, f, ensure_ascii=False, indent=4)
     
-    def rand_sleep(self, base=None, rand_range=0.01):
+    def rand_sleep(self, base=None, rand_range=0.001):
         if not base:
             base = self.config["interval"]
         time.sleep(base + random.random() * rand_range)
@@ -78,7 +80,7 @@ class PoeOrbBot:
     def get_item_info(self):
         for _ in range(3):
             pyautogui.hotkey('ctrl', 'alt', 'c')
-            self.rand_sleep(0.01, 0.01)
+            self.rand_sleep(0.001, 0.001)
         return pyperclip.paste()
     
     def has_target_affix(self, text , need_count):
@@ -209,6 +211,9 @@ class PoeOrbBotGUI:
         self.root.title("POEorbBot")
         self.root.geometry("550x880")
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        self.root.attributes('-topmost', True)
+        
+        keyboard.add_hotkey('f3', self.toggle_run)
         
         self.coord_type = tk.StringVar(value="transmutation")
         self.current_item_var = tk.StringVar(value="0/0")
@@ -331,10 +336,11 @@ class PoeOrbBotGUI:
         # 4. 控制按钮
         ctrl_frame = ttk.Frame(self.root)
         ctrl_frame.pack(padx=3, pady=2, fill=tk.X)
-        self.start_btn = ttk.Button(ctrl_frame, text="开始", command=self.start_tool)
-        self.start_btn.pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
-        self.stop_btn = ttk.Button(ctrl_frame, text="停止", command=self.stop_tool, state="disabled")
-        self.stop_btn.pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
+        ttk.Label(ctrl_frame, text="F3 开始/停止").grid(row=0, column=0, columnspan=2, padx=2, pady=1, sticky=tk.W)
+        # self.start_btn = ttk.Button(ctrl_frame, text="开始", command=self.start_tool)
+        # self.start_btn.pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
+        # self.stop_btn = ttk.Button(ctrl_frame, text="停止", command=self.stop_tool, state="disabled")
+        # self.stop_btn.pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
         
         # 5. 统计信息
         stat_frame = ttk.LabelFrame(self.root, text="统计信息")
@@ -551,11 +557,17 @@ class PoeOrbBotGUI:
         self.bot.running = True
         self.bot.start_time = time.time()
         
-        self.start_btn.config(state="disabled")
-        self.stop_btn.config(state="normal")
+        # self.start_btn.config(state="disabled")
+        # self.stop_btn.config(state="normal")
         
         self.start_time_thread()
         threading.Thread(target=self.run_bot, daemon=True).start()
+        
+    def toggle_run(self):
+        if self.bot.running:
+            self.stop_tool()
+        else:
+            self.start_tool()
     
     def run_bot(self):
         total_item = len(self.bot.config["item_positions"])
@@ -595,7 +607,7 @@ class PoeOrbBotGUI:
                 seconds = elapsed % 60
                 self.time_var.set(f"{hours:02d}:{minutes:02d}:{seconds:02d}")
                 
-                time.sleep(1)
+                time.sleep(0.1)
         self.time_thread = threading.Thread(target=update_time, daemon=True)
         self.time_thread.start()
     
