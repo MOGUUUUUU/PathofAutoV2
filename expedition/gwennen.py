@@ -34,7 +34,7 @@ class GwennenBot:
 
         # 商店格子配置
         self.shop_rows = 12
-        self.shop_cols = 12
+        self.shop_cols = 6
         self.shop_top_left = None   # (x, y)
         self.shop_bot_right = None  # (x, y)
 
@@ -86,12 +86,11 @@ class GwennenBot:
     # ── 物品信息读取 ──
     def read_item(self, pos):
         """悬停到格子，用 Ctrl+Alt+C 读取物品信息"""
-        pyautogui.moveTo(pos, duration=0.05)
-        rand_sleep(0.08)
+        pyautogui.moveTo(pos)
         pyperclip.copy("")
         for _ in range(3):
             pyautogui.hotkey('ctrl', 'alt', 'c')
-            rand_sleep(0.04)
+            rand_sleep(0.01)
         return pyperclip.paste()
 
     def matches_keywords(self, text, keywords):
@@ -102,7 +101,7 @@ class GwennenBot:
     # ── 购买 ──
     def buy_item(self, pos):
         """Ctrl+左键购买"""
-        pyautogui.moveTo(pos, duration=0.05)
+        pyautogui.moveTo(pos, duration=0.01)
         rand_sleep(0.05)
         pyautogui.keyDown('ctrl')
         rand_sleep(0.03)
@@ -114,9 +113,11 @@ class GwennenBot:
     # ── 删除物品 ──
     def delete_item(self, pos):
         """鼠标移到物品上，输入 /delete 回车"""
-        pyautogui.moveTo(pos, duration=0.05)
+        pyautogui.moveTo(pos, duration=0.01)
         rand_sleep(0.08)
-        pyperclip.copy("/delete")
+        pyautogui.click(button='left')
+        pyautogui.press('enter')
+        pyperclip.copy("/destroy")
         pyautogui.hotkey('ctrl', 'v')
         rand_sleep(0.05)
         pyautogui.press('enter')
