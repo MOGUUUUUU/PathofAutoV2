@@ -7,7 +7,7 @@ from dataclasses import dataclass
 CONVERT_CHAOS_COST = 1/38*30
 CONVERT_GOLD_COST = 1/8*30
 CHAOS_GOLD = 15
-ESSENCE_GOLDS = 100
+ESSENCE_GOLDS = 75
 
 @dataclass
 class ConvertItem:
@@ -95,7 +95,7 @@ class ConvertTool:
         
         E_pi_net = E_X - cheapest.value - CONVERT_CHAOS_COST * E_k
         gold_cost = E_k * CONVERT_GOLD_COST + E_pi_net * CHAOS_GOLD + cheapest.gold
-        return E_pi_net, gold_cost
+        return E_pi_net, E_k, gold_cost
 
 
 
@@ -115,5 +115,5 @@ if __name__ == "__main__":
     tool = ConvertTool(items)
     mode = "exact"  # 可选 "exact" 或 "approx"
     for threshold in probably_threshold:
-        net_profit, gold_cost = tool.calculate_expected_profit(threshold)
-        print(threshold, f'{net_profit:.2f}, {gold_cost:.2f}, {10000/gold_cost:.2f}')
+        net_profit, tries, gold_cost = tool.calculate_expected_profit(threshold)
+        print(threshold, f'{net_profit:.2f}, {tries:.2f},{gold_cost:.2f}, {10000/gold_cost:.2f}')
