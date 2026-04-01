@@ -283,37 +283,58 @@ class DannigBot(ExpeditionBotBase):
 
         while self.running:
             shop_positions = self.get_shop_positions()
+            cols = self.shop_cols
 
             if self.single_row_only:
-                # 只购买日志模式：只遍历最后一行（反向遍历时的前 cols 个）
-                row_positions = shop_positions[:self.shop_cols]
+                # 只购买日志模式：从最后一行开始找第一个有物品的行
+                # 反转后 shop_positions[0:cols] 是最后一行，shop_positions[cols:2*cols] 是倒数第二行...
+                row_positions = None
+                for row_idx in range(self.shop_rows):
+                    start = row_idx * cols
+                    end = start + cols
+                    row_cells = shop_positions[start:end]
+
+                    # 检测这一行是否有物品
+                    has_item = False
+                    for pos in row_cells:
+                        if not self.running:
+                            return
+                        text = self.read_item(pos)
+                        if text:
+                            has_item = True
+                            break
+
+                    if has_item:
+                        row_positions = row_cells
+                        break
             else:
                 row_positions = shop_positions
 
-            for pos in row_positions:
-                if not self.running:
-                    return
-
-                text = self.read_item(pos)
-                if not text:
-                    continue
-
-                if self.matches_keywords(text, self.buy_keywords):
-                    self.buy_item(pos)
-                    self.buy_count += 1
-                    self.total_bought += 1
-                    if bought_cb:
-                        bought_cb(self.total_bought)
-                    if status_cb:
-                        status_cb(f"购买成功！累计 {self.total_bought} 件")
-
-                    rand_sleep(0.15)
-                    recheck = self.read_item(pos)
-                    if recheck and self.matches_keywords(recheck, self.buy_keywords):
-                        self.running = False
-                        if status_cb:
-                            status_cb("购买失败（可能货币不足），已停止")
+            if row_positions:
+                for pos in row_positions:
+                    if not self.running:
                         return
+
+                    text = self.read_item(pos)
+                    if not text:
+                        continue
+
+                    if self.matches_keywords(text, self.buy_keywords):
+                        self.buy_item(pos)
+                        self.buy_count += 1
+                        self.total_bought += 1
+                        if bought_cb:
+                            bought_cb(self.total_bought)
+                        if status_cb:
+                            status_cb(f"购买成功！累计 {self.total_bought} 件")
+
+                        rand_sleep(0.15)
+                        recheck = self.read_item(pos)
+                        if recheck and self.matches_keywords(recheck, self.buy_keywords):
+                            self.running = False
+                            if status_cb:
+                                status_cb("购买失败（可能货币不足），已停止")
+                            return
 
             if self.running:
                 if status_cb:
@@ -662,7 +683,7 @@ class DannigTabPanel(ExpeditionTabPanel):
         # ── 只购买日志选项 ──
         f_opt = ttk.LabelFrame(self.frame, text="购买选项")
         f_opt.pack(padx=6, pady=3, fill=tk.X)
-        ttk.Checkbutton(f_opt, text="只购买日志（仅遍历最后一行）",
+        ttk.Checkbutton(f_opt, text="只购买日志（从最后一行找起，有物品则购买后刷新）",
                        variable=self.single_row_var).pack(padx=6, pady=3, anchor=tk.W)
 
     def _apply_coords(self, coords):
@@ -708,7 +729,7 @@ class HomeTabPanel:
             ("Dannig（远征商人）",
              "• 需设置3个坐标：商店左上角、商店右下角、刷新按钮\n"
              "• 无背包清理功能\n"
-             "• 可选\"只购买日志\"模式：仅遍历最后一行，遍历完后刷新"),
+             "• 可选\"只购买日志\"模式：从最后一行开始探测，找到第一个有物品的行后遍历购买，然后刷新"),
         ]
 
         for i, (title, content) in enumerate(docs):
