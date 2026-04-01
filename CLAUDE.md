@@ -9,8 +9,8 @@ PathofAutoV2 是一套用于《流放之路》（Path of Exile）游戏经济自
 ## 运行脚本
 
 ```bash
-# Gwennen 远征商人自动购买机器人
-python expedition/gwennen.py
+# 远征商人自动购买机器人（Gwennen/Tugen/Dannig 三合一）
+python expedition/expedition.py
 
 # 宝珠制作机器人（合并版，双 Tab 选择简化/完整模式）
 python poborbbot/POBorbBotMerged.py
@@ -40,7 +40,7 @@ pyautogui pyperclip keyboard paddleocr opencv-python numpy matplotlib requests
 
 ### 各子模块
 
-- **`expedition/`** — Gwennen 远征商人自动购买。见下方详细说明。
+- **`expedition/`** — 远征商人自动购买（三合一）。`expedition.py` 为合并入口（推荐），包含 Gwennen/Tugen/Dannig 三个工具的标签页界面；`gwennen.py`、`tugen.py`、`dannig.py` 为独立脚本（仍可用）。
 - **`poborbbot/`** — 宝珠制作自动化。`POBorbBotMerged.py` 为合并版（推荐使用），`POBorbBot.py`（7种宝珠）和 `POBorbBotV2.py`（3种宝珠）为旧版，共用 `poe_orb_config.json` 配置。
 - **`faust/`** — 交易所价格读取机器人，使用 PaddleOCR（中文模型）识别游戏内 UI 文字，hardcode 了 1920x1080 屏幕坐标，腾讯服专用。
 - **`essence/`** — 精华货币分析：`ninja.py` 抓取 poe.ninja 价格写入 `price.json`；`main.py` 做蒙特卡洛模拟；`emulator.py` 做期望值计算，读取 `essence_tencent.json`。
@@ -56,40 +56,49 @@ pyautogui pyperclip keyboard paddleocr opencv-python numpy matplotlib requests
 
 ---
 
-## expedition/gwennen.py
+## expedition/expedition.py
 
 ### 类结构
 
-- `GwennenBot` — 纯逻辑层，不依赖 tkinter
-- `GwennenGUI` — Tkinter 界面，持有 `GwennenBot` 实例
+- `ExpeditionBotBase` — 公共基类（配置、坐标、关键词、主循环框架）
+- `GwennenBot` / `TugenBot` / `DannigBot` — 继承基类，实现不同的购买逻辑
+- `HomeTabPanel` — 首页：使用说明 + 统一配置保存/加载
+- `ExpeditionTabPanel` — 工具标签页面板（每个工具一个）
 
-### 主循环逻辑
+### 三种购买方式
 
+| 商人 | 购买操作 | 背包清理 |
+|------|----------|----------|
+| Gwennen | Ctrl+左键 | 有保留关键词时清理 |
+| Tugen | 左键 + 点击确认按钮 | 不清理 |
+| Dannig | Ctrl+左键 | 不清理 |
+
+### 配置文件
+
+统一保存到 `expedition/expedition.json`，按工具名分节：
+```json
+{
+  "gwennen": { ... },
+  "tugen": { ... },
+  "dannig": { ... }
+}
 ```
-遍历商店所有格子（m×n，左上/右下两点等分计算；m/n 由 GUI 可配置，默认 12×12）
-  └─ Ctrl+Alt+C 读取物品信息
-      └─ 匹配购买关键词？
-          ├─ 是 → Ctrl+左键购买 → buy_count++
-          │       └─ 再次读取同格：物品还在 → 货币不足，停止
-          │       └─ buy_count >= check_interval（GUI 可配置）→ 清理背包
-          └─ 否 → 跳过
-一页遍历完 → 点刷新按钮 → 等待 REFRESH_DELAY(1秒) → 继续
-```
-
-### 清背包逻辑
-
-遍历背包 12×5 每一格，读取物品信息，不匹配**保留关键词**的物品执行 `/destroy` 命令删除。购买关键词与保留关键词是两套独立的列表。
 
 ### 坐标设置
 
-需捕获 5 个坐标：商店左上角、商店右下角、背包左上角、背包右下角、刷新按钮。`gwennen.py` 启动时会自动尝试从 `expedition/gwennen.json` 加载配置，也可在 GUI 里手动保存/加载。
+每个工具需捕获 3-5 个坐标：
+- 商店左上角、商店右下角（必须）
+- 刷新按钮（必须）
+- 背包左上角、背包右下角（Gwennen 独有，用于清理）
 
-### Gwennen GUI 细节
+### 热键
 
-- 支持两套关键词列表（购买关键词 / 背包保留关键词），均支持添加、删除、清空
-- 关键词列表带滚动条，适合较长列表
-- 商店行列（shop_rows/shop_cols）可在 GUI 中设置并保存到配置
-- `F3` 启停，`=` 捕获当前选中的坐标类型
+- `F3` — 开始/停止
+- `=` — 捕获当前坐标类型
+
+---
+
+## poborbbot/POBorbBotMerged.py
 
 ### 类结构
 
