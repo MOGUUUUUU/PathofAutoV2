@@ -34,7 +34,7 @@ class GwennenBot:
 
         # 商店格子配置
         self.shop_rows = 12
-        self.shop_cols = 6
+        self.shop_cols = 12
         self.shop_top_left = None   # (x, y)
         self.shop_bot_right = None  # (x, y)
 
@@ -112,7 +112,7 @@ class GwennenBot:
 
     # ── 删除物品 ──
     def delete_item(self, pos):
-        """鼠标移到物品上，输入 /delete 回车"""
+        """鼠标移到物品上，输入 /destroy 回车"""
         pyautogui.moveTo(pos, duration=0.01)
         rand_sleep(0.08)
         pyautogui.click(button='left')
@@ -206,7 +206,7 @@ class GwennenGUI:
 
         self.root = tk.Tk()
         self.root.title("Gwennen 自动购买")
-        self.root.geometry("560x780")
+        self.root.geometry("620x620")
         self.root.attributes('-topmost', True)
         self.root.protocol("WM_DELETE_WINDOW", self._on_closing)
 
@@ -235,13 +235,14 @@ class GwennenGUI:
         self.shop_cols_var = tk.IntVar(value=12)
 
         self._build_ui()
+        self._load_config(silent=True)
         self.root.bind('<equal>', lambda _: self._capture(self.coord_mode.get()))
         self._time_thread = None
 
     def _build_ui(self):
         # ── 坐标设置 ──
         f_coord = ttk.LabelFrame(self.root, text="坐标设置（选择类型后鼠标移过去按 =）")
-        f_coord.pack(padx=5, pady=4, fill=tk.X)
+        f_coord.pack(padx=6, pady=(6, 3), fill=tk.X)
 
         coord_options = [
             ("shop_tl",  "商店左上角"),
@@ -259,7 +260,7 @@ class GwennenGUI:
 
         # ── 商店格子尺寸 ──
         f_grid = ttk.LabelFrame(self.root, text="商店格子尺寸")
-        f_grid.pack(padx=5, pady=4, fill=tk.X)
+        f_grid.pack(padx=6, pady=3, fill=tk.X)
         ttk.Label(f_grid, text="行数：").grid(row=0, column=0, padx=4, pady=2, sticky=tk.W)
         ttk.Spinbox(f_grid, from_=1, to=20, textvariable=self.shop_rows_var, width=6).grid(row=0, column=1, padx=4, pady=2)
         ttk.Label(f_grid, text="列数：").grid(row=0, column=2, padx=4, pady=2, sticky=tk.W)
@@ -267,32 +268,32 @@ class GwennenGUI:
 
         # ── 购买关键词 ──
         f_buy = ttk.LabelFrame(self.root, text="购买目标关键词（匹配任意一个即购买）")
-        f_buy.pack(padx=5, pady=4, fill=tk.BOTH, expand=True)
+        f_buy.pack(padx=6, pady=3, fill=tk.BOTH, expand=False)
         self._build_kw_panel(f_buy, self.buy_kw_input, self.buy_keywords, "buy")
 
         # ── 保留关键词 ──
         f_keep = ttk.LabelFrame(self.root, text="背包保留关键词（匹配任意一个则不删除）")
-        f_keep.pack(padx=5, pady=4, fill=tk.BOTH, expand=True)
+        f_keep.pack(padx=6, pady=3, fill=tk.BOTH, expand=False)
         self._build_kw_panel(f_keep, self.keep_kw_input, self.keep_keywords, "keep")
 
         # ── 参数 ──
         f_param = ttk.LabelFrame(self.root, text="参数")
-        f_param.pack(padx=5, pady=4, fill=tk.X)
+        f_param.pack(padx=6, pady=3, fill=tk.X)
         ttk.Label(f_param, text="每购买多少次检查背包：").grid(row=0, column=0, padx=4, pady=2, sticky=tk.W)
         ttk.Spinbox(f_param, from_=1, to=999, textvariable=self.check_interval_var, width=7).grid(row=0, column=1, padx=4, pady=2)
 
         # ── 控制 ──
-        ttk.Label(self.root, text="F3 开始 / 停止", foreground="gray").pack(pady=2)
+        ttk.Label(self.root, text="F3 开始 / 停止", foreground="gray").pack(pady=(1, 2))
 
         # ── 配置按钮 ──
         f_cfg = ttk.Frame(self.root)
-        f_cfg.pack(pady=2)
+        f_cfg.pack(pady=1)
         ttk.Button(f_cfg, text="保存配置", width=12, command=self._save_config).pack(side=tk.LEFT, padx=5)
         ttk.Button(f_cfg, text="加载配置", width=12, command=self._load_config).pack(side=tk.LEFT, padx=5)
 
         # ── 状态 / 统计 ──
         f_stat = ttk.LabelFrame(self.root, text="运行状态")
-        f_stat.pack(padx=5, pady=4, fill=tk.X)
+        f_stat.pack(padx=6, pady=(3, 6), fill=tk.X)
         ttk.Label(f_stat, textvariable=self.bought_var).grid(row=0, column=0, padx=6, pady=2, sticky=tk.W)
         ttk.Label(f_stat, textvariable=self.time_var).grid(row=0, column=1, padx=6, pady=2, sticky=tk.W)
         ttk.Label(f_stat, textvariable=self.status_var, foreground="blue").grid(row=1, column=0, columnspan=2, padx=6, pady=2, sticky=tk.W)
@@ -302,15 +303,22 @@ class GwennenGUI:
         ttk.Entry(parent, textvariable=input_var, width=22, font=("Microsoft YaHei", 9)).grid(row=0, column=1, padx=4, pady=2)
         ttk.Button(parent, text="添加", width=7,
                    command=lambda: self._add_kw(input_var, kw_list, lb)).grid(row=0, column=2, padx=4, pady=2)
-        lb = Listbox(parent, height=3, font=("Microsoft YaHei", 9))
+        lb = Listbox(parent, height=4, font=("Microsoft YaHei", 9))
         lb.grid(row=1, column=0, columnspan=2, sticky=tk.NSEW, padx=4, pady=2)
+
+        sb = ttk.Scrollbar(parent, orient=tk.VERTICAL, command=lb.yview)
+        lb.configure(yscrollcommand=sb.set)
+        sb.grid(row=1, column=2, sticky=tk.NS, pady=2)
+
         f_btn = ttk.Frame(parent)
-        f_btn.grid(row=1, column=2, padx=4, pady=2, sticky=tk.N)
+        f_btn.grid(row=1, column=3, padx=4, pady=2, sticky=tk.N)
         ttk.Button(f_btn, text="删除", width=7,
                    command=lambda: self._del_kw(kw_list, lb)).pack(pady=1)
         ttk.Button(f_btn, text="清空", width=7,
                    command=lambda: self._clear_kw(kw_list, lb)).pack(pady=1)
+
         parent.grid_columnconfigure(1, weight=1)
+        parent.grid_rowconfigure(1, weight=1)
         setattr(self, f"_{tag}_lb", lb)
 
     def _add_kw(self, input_var, kw_list, lb):
@@ -433,9 +441,10 @@ class GwennenGUI:
             json.dump(data, f, ensure_ascii=False, indent=4)
         self.status_var.set("配置已保存")
 
-    def _load_config(self):
+    def _load_config(self, silent=False):
         if not os.path.exists(CONFIG_PATH):
-            messagebox.showinfo("提示", "未找到配置文件")
+            if not silent:
+                messagebox.showinfo("提示", "未找到配置文件")
             return
         try:
             with open(CONFIG_PATH, "r", encoding="utf-8") as f:
