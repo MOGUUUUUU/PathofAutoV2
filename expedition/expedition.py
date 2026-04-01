@@ -247,6 +247,31 @@ class TugenBot(ExpeditionBotBase):
 # Dannig（Ctrl+左键）
 # ──────────────────────────────────────────────
 class DannigBot(ExpeditionBotBase):
+    def __init__(self):
+        super().__init__()
+        self.single_row_only = False  # 只购买日志模式
+
+    def _get_cell_positions_reverse(self, top_left, bot_right, rows, cols):
+        """从右下到左上遍历商店格子"""
+        x0, y0 = top_left
+        x1, y1 = bot_right
+        cell_w = (x1 - x0) / cols
+        cell_h = (y1 - y0) / rows
+        positions = []
+        for r in range(rows - 1, -1, -1):  # 从最后一行到第一行
+            for c in range(cols - 1, -1, -1):  # 从最后一列到第一列
+                cx = x0 + cell_w * c + cell_w / 2
+                cy = y0 + cell_h * r + cell_h / 2
+                positions.append((int(cx), int(cy)))
+        return positions
+
+    def get_shop_positions(self):
+        """Dannig 使用反向遍历"""
+        return self._get_cell_positions_reverse(
+            self.shop_top_left, self.shop_bot_right,
+            self.shop_rows, self.shop_cols
+        )
+
     def buy_item(self, pos):
         """按下 Ctrl，左键点击物品"""
         pyautogui.moveTo(pos, duration=0.01)
@@ -257,6 +282,51 @@ class DannigBot(ExpeditionBotBase):
         rand_sleep(0.03)
         pyautogui.keyUp('ctrl')
         rand_sleep(0.1)
+
+    def run(self, status_cb=None, bought_cb=None):
+        """Dannig 运行逻辑：支持只购买日志模式"""
+        self.buy_count = 0
+        self.total_bought = 0
+        self.start_time = time.time()
+
+        while self.running:
+            shop_positions = self.get_shop_positions()
+
+            if self.single_row_only:
+                # 只购买日志模式：只遍历最后一行（反向遍历时的前 cols 个）
+                row_positions = shop_positions[:self.shop_cols]
+            else:
+                row_positions = shop_positions
+
+            for pos in row_positions:
+                if not self.running:
+                    return
+
+                text = self.read_item(pos)
+                if not text:
+                    continue
+
+                if self.matches_keywords(text, self.buy_keywords):
+                    self.buy_item(pos)
+                    self.buy_count += 1
+                    self.total_bought += 1
+                    if bought_cb:
+                        bought_cb(self.total_bought)
+                    if status_cb:
+                        status_cb(f"购买成功！累计 {self.total_bought} 件")
+
+                    rand_sleep(0.15)
+                    recheck = self.read_item(pos)
+                    if recheck and self.matches_keywords(recheck, self.buy_keywords):
+                        self.running = False
+                        if status_cb:
+                            status_cb("购买失败（可能货币不足），已停止")
+                        return
+
+            if self.running:
+                if status_cb:
+                    status_cb("刷新商店...")
+                self.refresh_shop()
 
 
 # ──────────────────────────────────────────────
@@ -585,6 +655,7 @@ class TugenTabPanel(ExpeditionTabPanel):
 # ──────────────────────────────────────────────
 class DannigTabPanel(ExpeditionTabPanel):
     def __init__(self, parent):
+        self.single_row_var = tk.BooleanVar(value=False)
         super().__init__(
             parent,
             DannigBot(),
@@ -594,6 +665,25 @@ class DannigTabPanel(ExpeditionTabPanel):
                 "refresh": "刷新按钮",
             }
         )
+
+    def _build_extra_ui(self):
+        # ── 只购买日志选项 ──
+        f_opt = ttk.LabelFrame(self.frame, text="购买选项")
+        f_opt.pack(padx=6, pady=3, fill=tk.X)
+        ttk.Checkbutton(f_opt, text="只购买日志（仅遍历最后一行）",
+                       variable=self.single_row_var).pack(padx=6, pady=3, anchor=tk.W)
+
+    def _apply_coords(self, coords):
+        self.bot.shop_top_left = coords.get("shop_tl")
+        self.bot.shop_bot_right = coords.get("shop_br")
+        self.bot.refresh_pos = coords.get("refresh")
+        self.bot.single_row_only = self.single_row_var.get()
+
+    def _get_extra_config(self):
+        return {"single_row_only": self.single_row_var.get()}
+
+    def _apply_extra_config(self, cfg):
+        self.single_row_var.set(cfg.get("single_row_only", False))
 
 
 # ──────────────────────────────────────────────
@@ -625,7 +715,8 @@ class HomeTabPanel:
              "• 无背包清理功能"),
             ("Dannig（远征商人）",
              "• 需设置3个坐标：商店左上角、商店右下角、刷新按钮\n"
-             "• 无背包清理功能"),
+             "• 无背包清理功能\n"
+             "• 可选\"只购买日志\"模式：仅遍历最后一行，遍历完后刷新"),
         ]
 
         for i, (title, content) in enumerate(docs):
