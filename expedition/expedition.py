@@ -46,9 +46,9 @@ class ExpeditionBotBase:
         positions = []
         for r in range(rows):
             for c in range(cols):
-                cx = x0 + cell_w * c + cell_w / 2
-                cy = y0 + cell_h * r + cell_h / 2
-                positions.append((int(cx), int(cy)))
+                cx = int(x0 + cell_w * c + cell_w / 2) + random.randint(-1, 1)
+                cy = int(y0 + cell_h * r + cell_h / 2) + random.randint(-1, 1)
+                positions.append((cx, cy))
         return positions
 
     def get_shop_positions(self):
@@ -253,16 +253,8 @@ class DannigBot(ExpeditionBotBase):
 
     def _get_cell_positions_reverse(self, top_left, bot_right, rows, cols):
         """从右下到左上遍历商店格子"""
-        x0, y0 = top_left
-        x1, y1 = bot_right
-        cell_w = (x1 - x0) / cols
-        cell_h = (y1 - y0) / rows
-        positions = []
-        for r in range(rows - 1, -1, -1):  # 从最后一行到第一行
-            for c in range(cols - 1, -1, -1):  # 从最后一列到第一列
-                cx = x0 + cell_w * c + cell_w / 2
-                cy = y0 + cell_h * r + cell_h / 2
-                positions.append((int(cx), int(cy)))
+        positions = self._get_cell_positions(top_left, bot_right, rows, cols)
+        positions.reverse()
         return positions
 
     def get_shop_positions(self):
