@@ -228,19 +228,126 @@ class TugenBot(ExpeditionBotBase):
     def __init__(self):
         super().__init__()
         self.confirm_pos = None
+        self.bargain_enabled = False
+        self.bargain_ratio = 0.45  # 砍价比例
+        self.bargain_threshold = 10  # 价格差阈值，低于此值不砍价
+        self.price_tl = None  # 价格输入框区域左上角
+        self.price_br = None  # 价格输入框区域右下角
+        self.bargain_confirm_pos = None  # 砍价确认按钮
 
-    def buy_item(self, pos):
-        """左键点击物品，然后点击确认按钮"""
+    def _read_price(self):
+        """读取当前价格输入框中的数字"""
+        pyperclip.copy("")
+        rand_sleep(0.05)
+        # 双击价格框选中文字
+        pyautogui.hotkey('ctrl', 'a')
+        rand_sleep(0.02)
+        pyautogui.hotkey('ctrl', 'c')
+        rand_sleep(0.05)
+        text = pyperclip.paste().strip()
+        try:
+            return int(text)
+        except (ValueError, TypeError):
+            return None
+
+    def bargain(self, status_cb=None):
+        """砍价逻辑：按比例压低价格"""
+        min_price = 0
+        max_iter = 10  # 防止死循环
+        for _ in range(max_iter):
+            if not self.running:
+                return
+
+            # 点击价格输入框区域
+            px = random.randint(self.price_tl[0], self.price_br[0])
+            py = random.randint(self.price_tl[1], self.price_br[1])
+            pyautogui.moveTo(px, py, duration=0.02)
+            rand_sleep(0.08)
+            pyautogui.click(button='left', clicks=2, interval=0.02)
+            rand_sleep(0.05)
+
+            max_price = self._read_price()
+            if max_price is None:
+                if min_price == 0:
+                    continue
+                else:
+                    return  # 无法读取价格，砍价结束
+
+            if abs(max_price - min_price) <= self.bargain_threshold:
+                return  # 价格差小于阈值，停止砍价
+
+            new_price = int((min_price + max_price) * self.bargain_ratio)
+            min_price = new_price
+
+            if status_cb:
+                status_cb(f"砍价：{max_price} → {new_price}")
+
+            # 输入新价格
+            pyautogui.hotkey('ctrl', 'a')
+            rand_sleep(0.02)
+            pyautogui.typewrite(str(new_price), interval=0.01)
+            rand_sleep(0.05)
+
+            # 点击砍价确认按钮
+            pyautogui.moveTo(self.bargain_confirm_pos, duration=0.02)
+            rand_sleep(0.08)
+            pyautogui.click(button='left')
+            rand_sleep(0.3)
+
+    def buy_item(self, pos, status_cb=None):
+        """左键点击物品，砍价（可选），然后点击确认按钮"""
         pyautogui.moveTo(pos, duration=0.01)
         rand_sleep(0.05)
         pyautogui.click(button='left')
         rand_sleep(0.1)
+
+        if self.bargain_enabled and self.price_tl and self.price_br and self.bargain_confirm_pos:
+            self.bargain(status_cb=status_cb)
 
         if self.confirm_pos:
             pyautogui.moveTo(self.confirm_pos, duration=0.01)
             rand_sleep(0.05)
             pyautogui.click(button='left')
             rand_sleep(0.1)
+
+    def run(self, status_cb=None, bought_cb=None):
+        """Tugen 运行逻辑：支持砍价"""
+        self.buy_count = 0
+        self.total_bought = 0
+        self.start_time = time.time()
+
+        while self.running:
+            shop_positions = self.get_shop_positions()
+
+            for pos in shop_positions:
+                if not self.running:
+                    return
+
+                text = self.read_item(pos)
+                if not text:
+                    continue
+
+                if self.matches_keywords(text, self.buy_keywords):
+                    self.buy_item(pos, status_cb=status_cb)
+                    self.buy_count += 1
+                    self.total_bought += 1
+                    if bought_cb:
+                        bought_cb(self.total_bought)
+                    if status_cb:
+                        status_cb(f"购买成功！累计 {self.total_bought} 件")
+
+                    rand_sleep(0.15)
+                    recheck = self.read_item(pos)
+                    if recheck and self.matches_keywords(recheck, self.buy_keywords):
+                        self.running = False
+                        if status_cb:
+                            status_cb("购买失败（可能货币不足），已停止")
+                        return
+
+            if self.running:
+                if status_cb:
+                    status_cb("刷新商店...")
+                self.refresh_shop()
 
 
 # ──────────────────────────────────────────────
@@ -641,10 +748,13 @@ class GwennenTabPanel(ExpeditionTabPanel):
 
 
 # ──────────────────────────────────────────────
-# Tugen Tab 面板（有确认按钮）
+# Tugen Tab 面板（有确认按钮 + 砍价）
 # ──────────────────────────────────────────────
 class TugenTabPanel(ExpeditionTabPanel):
     def __init__(self, parent):
+        self.bargain_var = tk.BooleanVar(value=False)
+        self.bargain_ratio_var = tk.DoubleVar(value=0.45)
+        self.bargain_threshold_var = tk.IntVar(value=10)
         super().__init__(
             parent,
             TugenBot(),
@@ -653,14 +763,49 @@ class TugenTabPanel(ExpeditionTabPanel):
                 "shop_br": "商店右下角",
                 "confirm": "确认购买按钮",
                 "refresh": "刷新按钮",
+                "price_tl": "价格框左上角",
+                "price_br": "价格框右下角",
+                "bargain_confirm": "砍价确认按钮",
             }
         )
+
+    def _build_extra_ui(self):
+        f_opt = ttk.LabelFrame(self.frame, text="砍价选项")
+        f_opt.pack(padx=6, pady=3, fill=tk.X)
+        ttk.Checkbutton(f_opt, text="启用砍价（购买前先压低价格）",
+                       variable=self.bargain_var).pack(padx=6, pady=3, anchor=tk.W)
+        fr = ttk.Frame(f_opt)
+        fr.pack(padx=6, pady=2, fill=tk.X)
+        ttk.Label(fr, text="砍价比例：").grid(row=0, column=0, padx=4, pady=2, sticky=tk.W)
+        ttk.Spinbox(fr, from_=0.1, to=0.9, increment=0.05,
+                   textvariable=self.bargain_ratio_var, width=6).grid(row=0, column=1, padx=4, pady=2)
+        ttk.Label(fr, text="价格差阈值：").grid(row=0, column=2, padx=4, pady=2, sticky=tk.W)
+        ttk.Spinbox(fr, from_=1, to=100,
+                   textvariable=self.bargain_threshold_var, width=6).grid(row=0, column=3, padx=4, pady=2)
 
     def _apply_coords(self, coords):
         self.bot.shop_top_left = coords.get("shop_tl")
         self.bot.shop_bot_right = coords.get("shop_br")
         self.bot.confirm_pos = coords.get("confirm")
         self.bot.refresh_pos = coords.get("refresh")
+        self.bot.price_tl = coords.get("price_tl")
+        self.bot.price_br = coords.get("price_br")
+        self.bot.bargain_confirm_pos = coords.get("bargain_confirm")
+        self.bot.bargain_enabled = self.bargain_var.get()
+        self.bot.bargain_ratio = self.bargain_ratio_var.get()
+        self.bot.bargain_threshold = self.bargain_threshold_var.get()
+
+    def _get_extra_config(self):
+        return {
+            "bargain_enabled": self.bargain_var.get(),
+            "bargain_ratio": self.bargain_ratio_var.get(),
+            "bargain_threshold": self.bargain_threshold_var.get(),
+        }
+
+    def _apply_extra_config(self, cfg):
+        self.bargain_var.set(cfg.get("bargain_enabled", False))
+        self.bargain_ratio_var.set(cfg.get("bargain_ratio", 0.45))
+        self.bargain_threshold_var.set(cfg.get("bargain_threshold", 10))
 
 
 # ──────────────────────────────────────────────
@@ -725,7 +870,8 @@ class HomeTabPanel:
              "• 支持背包清理：每购买一定次数后检查背包，删除不匹配保留关键词的物品"),
             ("Tugen（远征商人）",
              "• 需设置4个坐标：商店左上角、商店右下角、确认购买按钮、刷新按钮\n"
-             "• 无背包清理功能"),
+             "• 可选砍价功能：需额外设置3个坐标（价格框左上角、价格框右下角、砍价确认按钮）\n"
+             "• 砍价使用二分法自动压低价格，直到价格差≤10停止"),
             ("Dannig（远征商人）",
              "• 需设置3个坐标：商店左上角、商店右下角、刷新按钮\n"
              "• 无背包清理功能\n"
