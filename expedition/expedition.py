@@ -7,8 +7,10 @@ import random
 import json
 import os
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 from tkinter import Listbox
+import cv2
+import numpy as np
 
 pyautogui.PAUSE = 0.03
 
@@ -36,6 +38,10 @@ class ExpeditionBotBase:
         self.buy_count = 0
         self.total_bought = 0
         self.start_time = 0
+        # 图像识别
+        self.target_img_paths = []
+        self._target_images = []
+        self._img_match_threshold = 0.3
 
     def _get_cell_positions(self, top_left, bot_right, rows, cols):
         """根据左上、右下角坐标等分计算所有格子中心坐标（行优先）"""
@@ -65,6 +71,110 @@ class ExpeditionBotBase:
             pyautogui.hotkey('ctrl', 'alt', 'c')
             rand_sleep(0.01)
         return pyperclip.paste()
+
+    # ── 图像识别（ORB 特征匹配）──
+    def _capture_shop_screenshot(self):
+        """截取商店区域，返回 cv2 图片"""
+        x0, y0 = self.shop_top_left
+        x1, y1 = self.shop_bot_right
+        region = (x0, y0, x1 - x0, y1 - y0)
+        screenshot = pyautogui.screenshot(region=region)
+        img = np.array(screenshot)
+        return cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+
+    def _load_target_images(self, paths):
+        """加载目标图片，提取 ORB 特征"""
+        orb = cv2.ORB_create()
+        self._target_images = []
+        for p in paths:
+            img = cv2.imread(p)
+            if img is None:
+                continue
+            kp, des = orb.detectAndCompute(img, None)
+            if des is not None and len(des) > 0:
+                self._target_images.append((img, kp, des))
+
+    def _get_cell_image(self, shop_img, col, row):
+        """从商店截图中切割指定行列的格子"""
+        h, w = shop_img.shape[:2]
+        cell_w = w / self.shop_cols
+        cell_h = h / self.shop_rows
+        x1 = int(col * cell_w)
+        y1 = int(row * cell_h)
+        x2 = int((col + 1) * cell_w)
+        y2 = int((row + 1) * cell_h)
+        return shop_img[y1:y2, x1:x2]
+
+    def _match_cell(self, cell_img):
+        """用 ORB 特征匹配，返回与所有目标图片中最高的相似度"""
+        if not self._target_images:
+            return 0.0
+        orb = cv2.ORB_create()
+        kp, des = orb.detectAndCompute(cell_img, None)
+        if des is None or len(des) < 2:
+            return 0.0
+
+        bf = cv2.BFMatcher(cv2.NORM_HAMMING)
+        best_score = 0.0
+        for _, _, target_des in self._target_images:
+            if target_des is None or len(target_des) < 2:
+                continue
+            matches = bf.knnMatch(des, target_des, k=2)
+            good = 0
+            for m in matches:
+                if len(m) == 2 and m[0].distance < 0.75 * m[1].distance:
+                    good += 1
+            score = good / max(len(des), len(target_des))
+            best_score = max(best_score, score)
+        return best_score
+
+    def _get_cell_positions_with_image_check(self, status_cb=None):
+        """截图 → 切割格子 → 图像匹配 → 返回通过的格子中心坐标"""
+        shop_img = self._capture_shop_screenshot()
+        debug_img = shop_img.copy()
+        passed = []
+        for r in range(self.shop_rows):
+            for c in range(self.shop_cols):
+                if not self.running:
+                    return passed
+                cell = self._get_cell_image(shop_img, c, r)
+                score = self._match_cell(cell)
+
+                # 在 debug 图上标注每个格子的相似度
+                h, w = debug_img.shape[:2]
+                cell_w = w / self.shop_cols
+                cell_h = h / self.shop_rows
+                tx = int(c * cell_w + 3)
+                ty = int(r * cell_h + cell_h / 2 + 4)
+                color = (0, 255, 0) if score >= self._img_match_threshold else (0, 0, 255)
+                cv2.putText(debug_img, f"{score:.2f}", (tx, ty),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.35, color, 1)
+
+                if score >= self._img_match_threshold:
+                    x0, y0 = self.shop_top_left
+                    cx = int(x0 + cell_w * c + cell_w / 2) + random.randint(-1, 1)
+                    cy = int(y0 + cell_h * r + cell_h / 2) + random.randint(-1, 1)
+                    passed.append((cx, cy))
+                    if status_cb:
+                        status_cb(f"图像匹配通过 ({r},{c}) 相似度 {score:.2f}")
+
+        self._save_debug_image(debug_img)
+        return passed
+
+    def _save_debug_image(self, img):
+        """保存 debug 图片，最多保留 10 份"""
+        debug_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "debug")
+        os.makedirs(debug_dir, exist_ok=True)
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        path = os.path.join(debug_dir, f"match_{ts}.png")
+        cv2.imwrite(path, img)
+        # 清理旧文件，只保留最新 10 份
+        files = sorted([
+            os.path.join(debug_dir, f) for f in os.listdir(debug_dir)
+            if f.startswith("match_") and f.endswith(".png")
+        ])
+        while len(files) > 10:
+            os.remove(files.pop(0))
 
     def matches_keywords(self, text, keywords):
         if not text or not keywords:
@@ -311,13 +421,19 @@ class TugenBot(ExpeditionBotBase):
             rand_sleep(0.1)
 
     def run(self, status_cb=None, bought_cb=None):
-        """Tugen 运行逻辑：支持砍价"""
+        """Tugen 运行逻辑：支持砍价 + 图像识别过滤"""
         self.buy_count = 0
         self.total_bought = 0
         self.start_time = time.time()
 
         while self.running:
-            shop_positions = self.get_shop_positions()
+            # 有目标图片时，先图像匹配过滤格子
+            if self._target_images:
+                shop_positions = self._get_cell_positions_with_image_check(status_cb)
+                if status_cb:
+                    status_cb(f"图像匹配完成，{len(shop_positions)} 个格子通过")
+            else:
+                shop_positions = self.get_shop_positions()
 
             for pos in shop_positions:
                 if not self.running:
@@ -755,6 +871,8 @@ class TugenTabPanel(ExpeditionTabPanel):
         self.bargain_var = tk.BooleanVar(value=False)
         self.bargain_ratio_var = tk.DoubleVar(value=0.45)
         self.bargain_threshold_var = tk.IntVar(value=10)
+        self.target_img_paths = []
+        self.img_threshold_var = tk.DoubleVar(value=0.3)
         super().__init__(
             parent,
             TugenBot(),
@@ -770,6 +888,7 @@ class TugenTabPanel(ExpeditionTabPanel):
         )
 
     def _build_extra_ui(self):
+        # ── 砍价选项 ──
         f_opt = ttk.LabelFrame(self.frame, text="砍价选项")
         f_opt.pack(padx=6, pady=3, fill=tk.X)
         ttk.Checkbutton(f_opt, text="启用砍价（购买前先压低价格）",
@@ -783,6 +902,59 @@ class TugenTabPanel(ExpeditionTabPanel):
         ttk.Spinbox(fr, from_=1, to=100,
                    textvariable=self.bargain_threshold_var, width=6).grid(row=0, column=3, padx=4, pady=2)
 
+        # ── 图像识别 ──
+        f_img = ttk.LabelFrame(self.frame, text="图像识别（先匹配图片，再读取文字）")
+        f_img.pack(padx=6, pady=3, fill=tk.BOTH, expand=False)
+
+        # 目标图片列表
+        self._img_lb = Listbox(f_img, height=4, font=("Microsoft YaHei", 9))
+        self._img_lb.grid(row=0, column=0, columnspan=2, sticky=tk.NSEW, padx=4, pady=2)
+
+        sb = ttk.Scrollbar(f_img, orient=tk.VERTICAL, command=self._img_lb.yview)
+        self._img_lb.configure(yscrollcommand=sb.set)
+        sb.grid(row=0, column=2, sticky=tk.NS, pady=2)
+
+        f_img_btn = ttk.Frame(f_img)
+        f_img_btn.grid(row=0, column=3, padx=4, pady=2, sticky=tk.N)
+        ttk.Button(f_img_btn, text="添加图片", width=8,
+                  command=self._add_target_images).pack(pady=1)
+        ttk.Button(f_img_btn, text="删除", width=8,
+                  command=self._del_target_image).pack(pady=1)
+        ttk.Button(f_img_btn, text="清空", width=8,
+                  command=self._clear_target_images).pack(pady=1)
+
+        # 相似度阈值
+        fr2 = ttk.Frame(f_img)
+        fr2.grid(row=1, column=0, columnspan=4, padx=4, pady=2, sticky=tk.W)
+        ttk.Label(fr2, text="相似度阈值：").grid(row=0, column=0, padx=4, pady=2, sticky=tk.W)
+        ttk.Spinbox(fr2, from_=0.1, to=1.0, increment=0.05,
+                   textvariable=self.img_threshold_var, width=6).grid(row=0, column=1, padx=4, pady=2)
+
+        f_img.grid_columnconfigure(0, weight=1)
+        f_img.grid_rowconfigure(0, weight=1)
+
+    def _add_target_images(self):
+        paths = filedialog.askopenfilenames(
+            title="选择目标图片",
+            filetypes=[("图片文件", "*.png *.jpg *.jpeg *.bmp")]
+        )
+        for p in paths:
+            if p not in self.target_img_paths:
+                self.target_img_paths.append(p)
+                self._img_lb.insert(tk.END, p)
+
+    def _del_target_image(self):
+        sel = self._img_lb.curselection()
+        if not sel:
+            return
+        for i in reversed(sel):
+            del self.target_img_paths[i]
+            self._img_lb.delete(i)
+
+    def _clear_target_images(self):
+        self.target_img_paths.clear()
+        self._img_lb.delete(0, tk.END)
+
     def _apply_coords(self, coords):
         self.bot.shop_top_left = coords.get("shop_tl")
         self.bot.shop_bot_right = coords.get("shop_br")
@@ -794,18 +966,33 @@ class TugenTabPanel(ExpeditionTabPanel):
         self.bot.bargain_enabled = self.bargain_var.get()
         self.bot.bargain_ratio = self.bargain_ratio_var.get()
         self.bot.bargain_threshold = self.bargain_threshold_var.get()
+        # 图像识别
+        self.bot._img_match_threshold = self.img_threshold_var.get()
+        if self.target_img_paths:
+            self.bot._load_target_images(self.target_img_paths)
+        else:
+            self.bot._target_images = []
 
     def _get_extra_config(self):
         return {
             "bargain_enabled": self.bargain_var.get(),
             "bargain_ratio": self.bargain_ratio_var.get(),
             "bargain_threshold": self.bargain_threshold_var.get(),
+            "target_img_paths": self.target_img_paths.copy(),
+            "img_threshold": self.img_threshold_var.get(),
         }
 
     def _apply_extra_config(self, cfg):
         self.bargain_var.set(cfg.get("bargain_enabled", False))
         self.bargain_ratio_var.set(cfg.get("bargain_ratio", 0.45))
         self.bargain_threshold_var.set(cfg.get("bargain_threshold", 10))
+        # 图像识别
+        self.img_threshold_var.set(cfg.get("img_threshold", 0.3))
+        self.target_img_paths.clear()
+        self._img_lb.delete(0, tk.END)
+        for p in cfg.get("target_img_paths", []):
+            self.target_img_paths.append(p)
+            self._img_lb.insert(tk.END, p)
 
 
 # ──────────────────────────────────────────────
