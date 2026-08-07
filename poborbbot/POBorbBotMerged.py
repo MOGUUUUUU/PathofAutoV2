@@ -243,6 +243,7 @@ class BotTabPanel:
                 pos = self.bot.config.get(f"{k}_pos")
                 self.orb_coord_vars[k] = tk.StringVar(value=f"({pos[0]},{pos[1]})" if pos else "未设置")
             self.orb_count_vars[k] = tk.StringVar(value="0")
+        self.interval_var = tk.StringVar(value=str(self.bot.config.get("interval", 0.02)))
 
     def _create_widgets(self):
         # 1. 坐标设置
@@ -315,8 +316,13 @@ class BotTabPanel:
         f_affix.grid_columnconfigure(1, weight=1)
         self._update_affix()
 
-        # 4. 控制提示
-        ttk.Label(self.frame, text="F3 开始 / 停止", foreground="gray").pack(pady=1)
+        # 4. 运行设置（操作间隔 + 控制提示）
+        f_ctrl = ttk.LabelFrame(self.frame, text="运行设置")
+        f_ctrl.pack(padx=5, pady=3, fill=tk.X)
+        ttk.Label(f_ctrl, text="操作间隔(秒)：").pack(side=tk.LEFT, padx=(5, 2), pady=3)
+        ttk.Entry(f_ctrl, textvariable=self.interval_var, width=8).pack(side=tk.LEFT, padx=2, pady=3)
+        ttk.Label(f_ctrl, text="（各操作之间的基础等待时间）", foreground="gray").pack(side=tk.LEFT, padx=2)
+        ttk.Label(f_ctrl, text="F3 开始 / 停止", foreground="gray").pack(side=tk.RIGHT, padx=5)
 
         # 5. 统计
         f_stat = ttk.LabelFrame(self.frame, text="统计信息")
@@ -451,6 +457,13 @@ class BotTabPanel:
     # ── 配置 ──
     def _save(self):
         self.bot.config["target_affixes"] = self.target_affixes.copy()
+        try:
+            interval = float(self.interval_var.get())
+            if interval < 0:
+                raise ValueError
+            self.bot.config["interval"] = interval
+        except ValueError:
+            pass  # 非法的间隔值只在启动时校验，保存时忽略
         self.bot.save_config()
         messagebox.showinfo("成功", "配置保存成功！")
         self.status_var.set("配置已保存")
@@ -468,6 +481,7 @@ class BotTabPanel:
         self._update_augment_tree()
         self.target_affixes = self.bot.config["target_affixes"].copy()
         self._update_affix()
+        self.interval_var.set(str(self.bot.config.get("interval", 0.02)))
         for k in self.orb_names:
             if k not in ("alter", "augment"):
                 pos = self.bot.config.get(f"{k}_pos")
@@ -484,6 +498,13 @@ class BotTabPanel:
             self.start()
 
     def start(self):
+        try:
+            interval = float(self.interval_var.get())
+            if interval < 0:
+                raise ValueError
+        except ValueError:
+            messagebox.showwarning("警告", "操作间隔必须是大于等于 0 的数字！")
+            return
         if not self.bot.config["item_positions"]:
             messagebox.showwarning("警告", "请至少添加一个物品坐标！")
             return
@@ -491,6 +512,7 @@ class BotTabPanel:
             messagebox.showwarning("警告", "请至少添加一个目标词缀！")
             return
         self.bot.config["target_affixes"] = self.target_affixes.copy()
+        self.bot.config["interval"] = interval
         self.bot.running = True
         self.bot.start_time = time.time()
         self._start_time_thread()
@@ -576,7 +598,9 @@ class MainApp:
         keyboard.add_hotkey('f3', self._toggle_active)
 
         # = 绑定当前激活 tab
-        self.root.bind('<equal>', lambda e: self._active_tab.get_coord(self._active_tab.coord_type.get()))
+        # 用全局钩子（与 F3 一致）：tkinter 的 <equal> 只在窗口有焦点时生效，
+        # 部分用户鼠标移到游戏窗口后 tkinter 失焦，导致 = 监听不到
+        keyboard.add_hotkey('=', lambda: self._active_tab.get_coord(self._active_tab.coord_type.get()))
 
         self.root.after(100, self._periodic_update)
 

@@ -1,2 +1,9 @@
 .claude
 *.json
+**/dist/
+**/build/
+**/.venv/
+**/__pycache__/
+# 远征机器人运行时产物（debug 标注图 / 录入模式模板截图）
+expedition/debug/
+expedition/pict/
