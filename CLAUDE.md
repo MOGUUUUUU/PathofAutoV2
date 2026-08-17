@@ -4,155 +4,91 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概述
 
-PathofAutoV2 是一套用于《流放之路》（Path of Exile）游戏经济自动化的 Python 脚本集合。各模块独立运行，无构建系统或测试框架。所有机器人为 **Windows 专用**（依赖 pyautogui 屏幕操作、winsound 提示音、tkinter GUI）。
+PathofAutoV2 是一组相互独立的《流放之路》（Path of Exile）经济自动化 Python 脚本，不是 Python 包，也没有统一构建系统。主要机器人依赖 `pyautogui`、全局热键、剪贴板和 tkinter，面向 Windows 游戏客户端运行；屏幕坐标和 OCR 区域都是绝对像素坐标。
 
-## 运行脚本
+仓库没有 README、依赖清单、锁文件、lint 配置、CI 或自动化测试。依赖未固定版本，需要手动安装：
 
 ```bash
-# 远征商人自动购买机器人（Gwennen/Tugen/Dannig 三合一）
+python -m pip install pyautogui pyperclip keyboard opencv-python numpy paddleocr paddlepaddle matplotlib requests lameenc pyinstaller
+```
+
+`winsound`、`tkinter`、`audioop` 来自 Python/系统发行版。`convert_voices.py` 使用 Python 3.12 或更早版本，因为 Python 3.13 已移除 `audioop`。PaddleOCR 的主程序和调试脚本分别使用 `.ocr()` 与 `.predict()` API；升级依赖时需同时验证两处兼容性。
+
+## 命令
+
+除打包命令外，以下命令均从仓库根目录执行。多个脚本使用相对路径读写配置或数据，改变工作目录会改变文件位置或导致读取失败。
+
+```bash
+# 远征商人自动购买（Home/Gwennen/Tugen/Dannig 四个 Tab）
 python expedition/expedition.py
 
-# 宝珠制作机器人（合并版，双 Tab 选择简化/完整模式）
+# 宝珠制作（简化版/完整版两个 Tab，推荐入口）
 python poborbbot/POBorbBotMerged.py
 
-# 打包宝珠机器人为独立 exe
+# 打包宝珠机器人为单文件 exe
 cd poborbbot && pyinstaller POBorbBotMerged.spec
 
-# 从 poe.ninja 抓取实时价格写入 price.json
+# 抓取 poe.ninja 数据并在仓库根目录生成 price.json
 python essence/ninja.py
 
-# 运行精华利润蒙特卡洛模拟
+# 精华随机模拟（使用脚本内硬编码的示例数据）
 python essence/main.py
 
-# 运行精华转换期望值计算器
+# 精华转换期望值（读取仓库根目录 essence_tencent.json）
 python essence/emulator.py
 
-# 运行法斯特交易所价格读取器
+# 法斯特交易所 OCR 自动化
 python faust/faust_v2.py
 
-# 小米 MiMo TTS 语音克隆，批量重构物品过滤器音效
-python convert_voices.py [音色样本.wav] [输入mp3目录] [输出目录]
+# 小米 MiMo TTS 批量重构音效
+python convert_voices.py <音色样本.wav> <输入mp3目录> <输出目录>
+
+# 无副作用的全仓库语法检查
+python -m compileall -q convert_voices.py expedition poborbbot essence faust scarabBot
+
+# 单文件语法检查（仓库没有可运行的单元测试）
+python -m py_compile path/to/file.py
 ```
 
-## 依赖库（需手动安装）
+不要把启动 GUI 机器人当作 smoke test：入口会注册全局热键，部分脚本启动后会立即移动鼠标、点击、输入文本、删除游戏物品、调用外部 API 或写入运行时文件。验证自动化行为需要用户准备好对应游戏界面和坐标后进行。
 
-```
-pyautogui pyperclip keyboard paddleocr opencv-python numpy pillow matplotlib requests lameenc
-```
+## 架构
 
-- `matplotlib` 仅 `essence/emulator.py` 使用；`Pillow` 用于 expedition 录入模式弹窗；`lameenc`（MP3 编码）仅 `convert_voices.py` 使用
-- `winsound`、`tkinter`、`audioop` 为 Python 内置模块；`audioop` 已随 Python 3.13 移除，`convert_voices.py` 需用 Python ≤ 3.12 运行
+### 运行与持久化模式
 
-## 架构要点
+- 自动化脚本通常由 tkinter 主线程、daemon 工作线程和共享的 `running` 布尔值组成。切换 Tab 或关闭窗口通过清除该标志协作停止工作线程。
+- 游戏物品信息通过悬停后发送 `Ctrl+Alt+C`，再从 `pyperclip` 读取；购买和制作动作直接调用 `pyautogui`。
+- `.gitignore` 忽略所有 `*.json`，所以 `poe_orb_config.json`、`price.json` 和 `expedition/expedition.json` 等运行时文件默认不会进入版本控制。`essence.json` 和 `essence_tencent.json` 是已经被跟踪的例外。
+- `expedition.py` 将配置和 debug 图路径锚定到脚本目录；宝珠配置、精华数据和 Faust 的 `debug/` 使用当前工作目录。
 
-### 各子模块
+### 远征机器人
 
-- **`expedition/`** — 远征商人自动购买。`expedition.py` 是唯一入口：一个 tkinter Notebook，含 Home/Gwennen/Tugen/Dannig 四个 Tab。`gwennen.json` 是旧版遗留配置，当前统一读 `expedition.json`。
-- **`poborbbot/`** — 宝珠制作自动化。`POBorbBotMerged.py` 为合并版（推荐使用），`POBorbBot.py`（7种宝珠）和 `POBorbBotV2.py`（3种宝珠）为旧版，共用根目录 `poe_orb_config.json`。
-- **`faust/`** — 交易所价格读取机器人，使用 PaddleOCR（中文模型）识别游戏内 UI 文字，hardcode 了 1920x1080 屏幕坐标，腾讯服专用。`orc.py` 是 PaddleOCR 检测框的独立调试脚本。
-- **`essence/`** — 精华货币分析：`ninja.py` 抓取 poe.ninja 价格写入 `price.json`；`main.py` 做蒙特卡洛模拟；`emulator.py` 做期望值计算，读取 `essence_tencent.json`。
-- **`scarabBot/`** — 圣甲虫转换机器人（未完成），依赖不存在的 `executor` 模块，**无法运行**。
-- **`convert_voices.py`** — 根目录独立脚本：用小米 MiMo TTS 接口（`mimo-v2-tts`）做语音克隆，把指定目录下的 mp3 文件名批量重新合成，已存在的输出自动跳过。API key 优先读 `MIMO_API_KEY` 环境变量。
+`expedition/expedition.py` 是当前唯一入口。代码分为三层：
 
-### 通用模式
+- `ExpeditionBotBase` 提供网格坐标计算、剪贴板读取、关键词匹配、刷新和图像过滤；`GwennenBot`、`TugenBot`、`DannigBot` 实现各自购买循环。
+- `ExpeditionTabPanel` 及三个子类负责 GUI 状态、坐标和商人特有选项，并在启动时把界面值应用到 bot。
+- `HomeTabPanel` 聚合三个 Tab 的设置，统一读写脚本目录下的 `expedition.json`；`MainApp` 管理当前 Tab 和 F3 热键。
 
-- 屏幕坐标均为绝对像素值，用户通过 GUI 中按 `=` 键捕获（`pyautogui.position()`）
-- 物品信息读取统一用 `Ctrl+Alt+C` 复制到剪贴板（`pyperclip.paste()`）后解析
-- 宝珠/购买机器人均用 `F3` 热键启停
-- 随机延迟（`rand_sleep` 中的 `random.random()` jitter）模拟人类操作
-- 配置持久化为 JSON 文件（脚本同目录或仓库根目录）
-- 多 Tab 程序切换 Tab 时自动停止另一个 Tab 正在运行的 bot，`F3`/`=` 始终作用于当前激活 Tab
+商人差异：Gwennen 用 Ctrl+左键购买，并可定期扫描 5x12 背包、通过 `/destroy` 删除不符合保留关键词的物品；Tugen 左键选物品后可迭代压价，再点确认；Dannig 反向遍历格子，可只处理从底部找到的第一行非空物品。
 
----
+Tugen 的可选图像过滤使用 ORB 特征：截图商店区域、按 `shop_rows x shop_cols` 切格子、用 Hamming BFMatcher 和 Lowe ratio 计算分数，再对通过阈值的格子读取文字。目标图片由 GUI 文件选择器添加；代码没有截图录入弹窗或 F4 录入模式。每轮匹配的标注图写到 `expedition/debug/`，只保留最新 10 张。
 
-## expedition/expedition.py
+热键并不完全相同：F3 是 `keyboard` 注册的全局热键；远征程序的 `=` 通过 Tk 绑定，仅在窗口有焦点时捕获坐标。切换商人 Tab 会停止其他商人的 bot。
 
-### 类结构
+### 宝珠机器人
 
-- `ExpeditionBotBase` — 公共基类：配置、坐标、主循环、`read_item`（Ctrl+Alt+C），以及图像模板匹配（截图 → 均分切格子 → `cv2.matchTemplate` 打分 → 按阈值过滤）和 debug 图保存
-- `GwennenBot` / `TugenBot` / `DannigBot` — 继承基类，覆写 `buy_item` 与 `run`：
-  - `TugenBot` 额外实现砍价（`bargain`：对价格框做二分压低，比例/阈值可配置）与录入模式（截图 → GUI 弹窗选格子 → 保存到 `pict/` → 重载模板）
-  - `DannigBot` 额外实现"只购买日志"模式（`single_row_only`：从最后一行向上探测第一个有物品的行）
-- `HomeTabPanel` — 首页：使用说明 + 统一配置保存/加载（`expedition.json`）
-- `ExpeditionTabPanel` — 工具标签页面板基类；各 `*TabPanel` 子类通过 `coord_labels`、`_build_extra_ui`、`_apply_coords`、`_get/_apply_extra_config` 定制
+`poborbbot/POBorbBotMerged.py` 是新开发应修改的入口；`POBorbBot.py` 和 `POBorbBotV2.py` 是逻辑重复的旧版。
 
-### 三种购买方式
+- `PoeOrbBotBase` 负责配置、宝珠点击、物品信息读取和词缀计数。
+- `PoeOrbBotSimple` 实现“蜕变 -> 增幅/改造循环”，匹配至少一个目标词缀。
+- `PoeOrbBotFull` 实现“蜕变 -> 改造 -> 增幅 -> 富豪 -> 崇高”，失败后按状态进入剥离或重铸。
+- `BotTabPanel` 是两种模式共用的参数化界面；`MainApp` 负责 Tab 切换及全局 F3、`=` 热键。
 
-| 商人 | 购买操作 | 背包清理 | 可选模式 |
-|------|----------|----------|----------|
-| Gwennen | Ctrl+左键 | 有保留关键词时清理（每 `check_interval` 次） | — |
-| Tugen | 左键 → 可选砍价 → 点确认按钮 | 不清理 | 砍价、图像匹配过滤 + 录入模式 |
-| Dannig | Ctrl+左键 | 不清理 | 只购买日志 |
+两个 bot 实例都读写仓库根目录的同一个扁平 `poe_orb_config.json`，而不是按 `simple`/`full` 分节。改造石和增幅石允许多个坐标并在使用时随机选择；其他宝珠是单坐标。切换模式会停止另一个 bot。
 
-### 图像识别与录入模式（Tugen）
+### 其他脚本
 
-- 目标图片默认存 `expedition/pict/`（按序号递增命名），GUI 也可手动添加任意图片
-- 运行时先截商店区域，按行列均分格子，用 `cv2.matchTemplate`（`TM_CCOEFF_NORMED`）逐格比对，相似度 ≥ 阈值（默认 0.3）才进入文字读取
-- 开启录入模式后每次刷新会弹窗展示商店截图 + 每格相似度，点击选中格子保存为模板，`F4` 跳过
-- 每次匹配的标注图存 `expedition/debug/`，最多保留 10 张
-
-### 配置文件
-
-统一保存到 `expedition/expedition.json`，按工具名分节（Home 页启动时自动加载）：
-```json
-{
-  "gwennen": { "coords": {...}, "shop_rows": 11, "shop_cols": 1, "buy_keywords": [...], "keep_keywords": [...], "check_interval": 30 },
-  "tugen": { "coords": {...}, "bargain_enabled": true, "bargain_ratio": 0.5, "bargain_threshold": 20, "target_img_paths": [...], "img_threshold": 0.9, "capture_mode": true },
-  "dannig": { "coords": {...}, "single_row_only": false }
-}
-```
-
-### 坐标设置
-
-商店格子按左上/右下角均分为 `shop_rows × shop_cols` 格（GUI 可调，默认 12×12）。各工具坐标：
-- 全部：商店左上角、商店右下角、刷新按钮
-- Gwennen 独有：背包左上角、背包右下角
-- Tugen 独有：确认购买按钮、复位点；启用砍价还需价格框左上/右下、砍价确认按钮
-- Dannig：仅 3 个基础坐标
-
-### 热键
-
-- `F3` — 开始/停止
-- `=` — 捕获当前坐标类型
-- `F4` — 录入模式弹窗中跳过
-
----
-
-## poborbbot/POBorbBotMerged.py
-
-### 类结构
-
-```
-PoeOrbBotBase          # 公共基类（配置读写、use_orb、check_item、beep）
-├── PoeOrbBotSimple    # 简化版状态机（3种宝珠）
-└── PoeOrbBotFull      # 完整版状态机（7种宝珠）
-
-BotTabPanel            # 通用 Tab 面板，接受任意 bot 实例和 orb_names 字典
-MainApp                # Notebook 双 Tab 主窗口
-```
-
-### 状态机
-
-**简化版**：`蜕变 → 增幅 ⟷ 改造`（目标：匹配1个词缀）
-
-**完整版**：`蜕变 → 改造循环（1词缀）→ 增幅（2词缀）→ 富豪（3词缀）→ 崇高（4词缀）→ 成功 / 剥离（退到3词缀重试）/ 重铸（归零重来）`
-
-### 配置
-
-- 读写仓库根目录 `poe_orb_config.json`，**合并版读 JSON 顶层键**；文件中 `full`/`simple` 子段是旧版 POBorbBot.py/V2 遗留，合并版不使用
-- 改造石/增幅石可配置多个坐标（`alter_positions`/`augment_positions`），使用时随机选一个
-- 完整版各宝珠可用 `use_augment`/`use_regal`/`use_extend`/`use_annulment`/`use_scouring` 配置开关（默认开启）
-- `POBorbBotMerged.spec` 为 PyInstaller 打包配置
-
-### Tab 切换行为
-
-切换 Tab 时自动停止另一个 Tab 正在运行的 bot，`F3` 和 `=` 始终作用于当前激活 Tab。
-
-## 注意事项
-
-- `scarabBot/PoeScarabBot.py` 因 `from executor import Executor` 缺失依赖，运行时会抛 `ImportError`
-- `price.json` 由 `essence/ninja.py` 抓取 poe.ninja 后写入，运行 `essence/main.py`、`emulator.py` 前需先填充
-- `faust_v2.py` 中的屏幕坐标针对中文版游戏客户端布局（腾讯服）
-- `POBorbBot.py` 和 `POBorbBotV2.py` 为旧版，新开发请基于 `POBorbBotMerged.py`
-- `expedition/gwennen.json` 为旧版遗留，新开发请只改 `expedition.json`
-- `convert_voices.py` 内嵌了一个硬编码的 API key 回退值（`MIMO_API_KEY` 环境变量优先），提交到仓库前应移除
+- `faust/faust_v2.py` 用中文 PaddleOCR 在作者客户端布局的固定区域中寻找文字和价格，并把标注截图写到当前目录的 `debug/`。主入口会立刻操作游戏界面。`faust/orc.py` 是独立调试脚本，含作者机器上的硬编码图片绝对路径。
+- `essence/ninja.py` 只负责把 poe.ninja 的 Essence/Fossil/DeliriumOrb 数据写到 `price.json`；仓库中没有脚本读取该文件。`essence/main.py` 使用内嵌示例数据，`essence/emulator.py` 独立读取 `essence_tencent.json`，三者不是顺序流水线。
+- `convert_voices.py` 在模块顶层读取参数、样本文件并启动 10 个并发 API 请求，因此不可安全导入。当前硬编码 API key 会覆盖 `MIMO_API_KEY` 环境变量，这是实现缺陷。
+- `scarabBot/PoeScarabBot.py` 是不可运行的原型：缺少 `executor` 模块，两个解析函数未实现，且没有入口。不要在此基础上假设已有完整转换流程。
