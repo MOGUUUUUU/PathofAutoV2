@@ -1,0 +1,30 @@
+POE 改造助手 — Windows 单文件版
+
+分发与运行
+1. 只需把 dist\POE_Orb_Helper.exe 发给客户。
+2. 适用于 Windows 10/11 64 位，无需安装 Python 或 pip 依赖。
+3. 双击 EXE 启动。首次启动需要解压内置资源到系统临时目录，请稍候。
+4. 词缀数据 affixes_equipment_types.json 已封装进 EXE，无需单独提供 JSON。
+
+首次使用
+- 选择装备类型、目标词缀以及打造设置。
+- 将鼠标放在游戏中的对应位置，按 = 捕获通货或物品坐标。
+- 确认坐标和目标条件后，按 F3 开始/停止。
+- 客户应根据自己的分辨率、游戏窗口位置重新设置坐标。
+
+保存设置
+- 内置默认设置为空坐标、空目标条件，不含开发目录中的测试条件。
+- 客户保存的设置位于：%LOCALAPPDATA%\PoeOrbBot\poe_改造助手_config.json
+- 该文件会在使用后生成，用于下次恢复个人设置，无需随 EXE 分发。
+- 更新 EXE 不会覆盖用户已保存的设置。
+- 如需备份或转移个人设置，可复制上述配置文件；界面“加载”可导入 JSON 配置。
+
+开发者重新打包
+- 使用 Windows 64 位 Python 3.11。
+- 本次构建环境：PyInstaller 6.12.0、CustomTkinter 6.0.0、PyAutoGUI 0.9.54、
+  pyperclip 1.11.0、keyboard 0.13.5、Pillow 11.3.0。
+- 在项目目录执行：python -m PyInstaller --noconfirm --clean pororbbot_ctk.spec
+- 输出文件：dist\POE_Orb_Helper.exe
+- 打包入口 packaging_entry.py 包含显式 --self-test 参数，可验证内置词缀数据、
+  GUI/热键初始化及配置保存读取，不会执行打造操作。
+- JSON 内置是资源封装，不是加密；更新词缀库后需重新打包。
